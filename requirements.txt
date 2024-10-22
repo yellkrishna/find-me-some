@@ -1,0 +1,12 @@
+fastapi 
+uvicorn 
+langchain 
+llama-index 
+requests 
+beautifulsoup4 
+supabase 
+python-dotenv 
+pydantic 
+aiohttp 
+openai
+transformers

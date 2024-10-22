@@ -1,0 +1,25 @@
+# ai-agent/docker-compose.yml
+version: '3.8'
+
+services:
+  ai-agent:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - supabase
+
+  supabase:
+    image: supabase/postgres
+    environment:
+      POSTGRES_PASSWORD: yourpassword
+      POSTGRES_DB: yourdbname
+    ports:
+      - "5432:5432"
+    volumes:
+      - supabase-data:/var/lib/postgresql/data
+
+volumes:
+  supabase-data:
