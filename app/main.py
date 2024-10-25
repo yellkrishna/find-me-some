@@ -1,64 +1,51 @@
 # app/main.py
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from ai_modules.data_collection import get_google_places_details, scrape_linkedin_company, get_yelp_reviews, scrape_company_website
-from ai_modules.data_processing import clean_data, structure_data
-from ai_modules.data_enrichment import geocode_address, classify_industry
-from ai_modules.summarization import index_data, generate_business_summary
-from ai_modules.utils import SUPABASE_URL, SUPABASE_KEY
+from .ai_modules.data_collection.data_collection import collect_data
 from supabase import create_client, Client
+import os
+from dotenv import load_dotenv
+import logging
+
+load_dotenv()
+
+# Initialize logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize Supabase client
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI()
 
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+class WebsiteInfo(BaseModel):
+    website_url: str
 
-class BusinessInfo(BaseModel):
-    name: str
-    address: str
-
-@app.post("/generate-summary/")
-async def generate_summary(info: BusinessInfo):
+@app.post("/collect-data/")
+async def collect_website_data(info: WebsiteInfo):
     try:
         # Step 1: Data Collection
-        google_data = get_google_places_details(info.name, info.address)
-        linkedin_data = scrape_linkedin_company(info.name, info.address)
-        yelp_data = get_yelp_reviews(info.name, info.address)
-        website_url = google_data.get("website", "")
-        website_data = scrape_company_website(website_url) if website_url else {}
-        
+        collected_data = collect_data(info.website_url)
+
+        # Commenting out the rest of the steps for now
         # Step 2: Data Cleaning
-        cleaned_google = clean_data(google_data)
-        cleaned_linkedin = clean_data(linkedin_data)
-        cleaned_yelp = clean_data(yelp_data)
-        cleaned_website = clean_data(website_data)
-        
         # Step 3: Data Structuring
-        structured = structure_data(cleaned_google, cleaned_linkedin, cleaned_yelp, cleaned_website)
-        
         # Step 4: Data Enrichment
-        geocoded = geocode_address(info.address)
-        structured['geocoding'] = geocoded
-        industry = classify_industry(google_data.get("types", [""])[0])  # Assuming first type represents industry
-        structured['industry'] = industry
-        
         # Step 5: Indexing
-        index = index_data(structured)
-        
         # Step 6: Summarization
-        summary = generate_business_summary(index)
-        
+
         # Step 7: Store in Supabase
         data_to_store = {
-            "name": info.name,
-            "address": info.address,
-            "summary": summary,
-            "geocoded_address": geocoded,
-            "industry": industry
+            "website_url": info.website_url,
+            "website_data": collected_data.get("website_data"),
         }
-        supabase.table("business_summaries").insert(data_to_store).execute()
-        
-        return {"summary": summary}
-    
+        supabase.table("website_data").insert(data_to_store).execute()
+
+        return {"message": "Data collected and stored successfully.", "data": data_to_store}
+
     except Exception as e:
+        logger.error(f"An error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))

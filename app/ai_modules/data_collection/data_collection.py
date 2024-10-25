@@ -7,6 +7,7 @@ import requests
 from dotenv import load_dotenv
 import logging
 from urllib.parse import urljoin, urlparse
+from .scrape import scrape_company_website
 
 load_dotenv()
 
@@ -123,143 +124,37 @@ def get_yelp_reviews(business_id):
         logger.error(f"Request to Yelp Reviews API failed: {e}")
         raise
 
-def scrape_company_website(website_url, max_pages=10, max_depth=2):
+
+def collect_data(website_url):
     """
-    Crawl and scrape the company's website content.
+    Collect data by scraping the company's website.
 
     Parameters:
         website_url (str): The URL of the company's website.
-        max_pages (int): Maximum number of pages to crawl.
-        max_depth (int): Maximum depth to crawl.
 
     Returns:
-        list: A list of dictionaries containing extracted information from each page.
-
-    Raises:
-        Exception: For issues during crawling.
-    """
-    logger.info(f"Crawling company website starting at '{website_url}'")
-
-    # Set up crawling parameters
-    visited_urls = set()
-    to_visit = [(website_url, 0)]  # Tuple of (url, depth)
-    scraped_data = []
-
-    try:
-        parsed_url = urlparse(website_url)
-        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-
-        # Start crawling
-        while to_visit and len(visited_urls) < max_pages:
-            current_url, depth = to_visit.pop(0)
-            if current_url in visited_urls or depth > max_depth:
-                continue
-
-            try:
-                logger.info(f"Scraping URL: {current_url}")
-                response = requests.get(current_url)
-                response.raise_for_status()
-                visited_urls.add(current_url)
-
-                # Parse the HTML content
-                soup = BeautifulSoup(response.content, 'lxml')
-
-                # Extract data from the page
-                page_data = {
-                    'url': current_url,
-                    'title': soup.title.string if soup.title else '',
-                    'meta_description': '',
-                    'headings': {
-                        'h1': [],
-                        'h2': [],
-                        'h3': [],
-                    },
-                    'content': '',
-                }
-
-                # Meta description
-                meta_desc_tag = soup.find('meta', attrs={'name': 'description'})
-                if meta_desc_tag:
-                    page_data['meta_description'] = meta_desc_tag.get('content', '')
-
-                # Headings
-                page_data['headings']['h1'] = [h.get_text(strip=True) for h in soup.find_all('h1')]
-                page_data['headings']['h2'] = [h.get_text(strip=True) for h in soup.find_all('h2')]
-                page_data['headings']['h3'] = [h.get_text(strip=True) for h in soup.find_all('h3')]
-
-                # Paragraphs
-                paragraphs = [p.get_text(strip=True) for p in soup.find_all('p')]
-                page_data['content'] = '\n'.join(paragraphs)
-
-                scraped_data.append(page_data)
-
-                # Find new links to follow
-                if len(visited_urls) < max_pages and depth < max_depth:
-                    for link_tag in soup.find_all('a', href=True):
-                        href = link_tag['href']
-                        full_url = urljoin(current_url, href)
-                        # Stay within the same domain
-                        if urlparse(full_url).netloc == parsed_url.netloc:
-                            if full_url not in visited_urls:
-                                to_visit.append((full_url, depth + 1))
-
-                # Polite crawling: delay between requests
-                time.sleep(1)
-
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Failed to scrape {current_url}: {e}")
-                continue
-
-        logger.info("Website crawling completed successfully.")
-        return scraped_data
-
-    except Exception as e:
-        logger.error(f"Website crawling failed: {e}")
-        raise
-
-
-def collect_data(business_name, address):
-    """
-    Collect data from Google Places, Yelp, and the company's website.
-
-    Parameters:
-        business_name (str): The name of the business.
-        address (str): The address of the business.
-
-    Returns:
-        dict: A dictionary containing collected data.
+        dict: A dictionary containing collected website data.
 
     Raises:
         Exception: Propagates exceptions from called functions.
     """
     try:
-        # Google Places Data
-        google_data = get_google_places_details(business_name, address)
-        
-        # Yelp Data
-        yelp_business_id = get_yelp_business_id(business_name, address)
-        yelp_reviews = get_yelp_reviews(yelp_business_id)
-        
         # Company Website Data
-        website_url = google_data.get("website")
         if website_url:
-            website_content = scrape_company_website(website_url)
+            website_data = scrape_company_website(website_url)
         else:
-            website_content = None
-            logger.info("Website URL not available from Google Places data.")
-        
+            website_data = None
+            logger.info("Website URL not provided.")
+
         # Combine collected data
         collected_data = {
-            "google_places": google_data,
-            "yelp_reviews": yelp_reviews,
-            "website_content": website_content,
+            "website_data": website_data,
         }
         logger.info("Data collection completed successfully.")
         return collected_data
     except Exception as e:
         logger.error(f"Data collection failed: {e}")
         raise
-
 
 
 # Remove after testing. Check correct functionality in main.py. 
