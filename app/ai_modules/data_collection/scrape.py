@@ -2,10 +2,10 @@
 
 import time
 import logging
+import re
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
-from readability import Document  # Import readability
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
@@ -49,29 +49,36 @@ def scrape_company_website(website_url, max_pages=10, max_depth=2):
                 time.sleep(2)  # Wait for JavaScript to load content
 
                 visited_urls.add(normalized_url)
-
                 html = driver.page_source
 
-                # Use readability to extract the main content
-                doc = Document(html)
-                content_html = doc.summary()
-                soup = BeautifulSoup(content_html, 'lxml')
+                try:
+                    # Use readability to extract the main content
+                    doc = Document(html)
+                    content_html = doc.summary()
+                    soup = BeautifulSoup(content_html, 'lxml')
+                    text = soup.get_text(separator='\n').strip()
 
-                # Extract plain text from the main content
-                text = soup.get_text(separator='\n')
+                    if not text:
+                        logger.warning(f"Readability failed to extract content from {current_url}, falling back to full page text.")
+                        # Fallback: if readability doesn't return content, use BeautifulSoup directly
+                        soup = BeautifulSoup(html, 'lxml')
+                        text = soup.get_text(separator='\n').strip()
+                
+                except Exception as e:
+                    logger.error(f"Error using readability on {current_url}: {e}")
+                    # Fallback: process full HTML text if readability fails
+                    soup = BeautifulSoup(html, 'lxml')
+                    text = soup.get_text(separator='\n').strip()
 
                 # Clean up the text
                 lines = [line.strip() for line in text.splitlines()]
                 text = '\n'.join(line for line in lines if line)
-
-                # Remove multiple blank lines
-                import re
-                text = re.sub(r'\n\s*\n', '\n\n', text)
+                text = re.sub(r'\n\s*\n', '\n\n', text)  # Remove multiple blank lines
 
                 # Extract data from the page
                 page_data = {
                     'url': current_url,
-                    'title': doc.title(),  # Use readability's title extraction
+                    'title': doc.title() if 'doc' in locals() else soup.title.string.strip() if soup.title else '',
                     'meta_description': '',
                     'headings': {
                         'h1': [h.get_text(strip=True) for h in soup.find_all('h1')],
@@ -87,6 +94,7 @@ def scrape_company_website(website_url, max_pages=10, max_depth=2):
                     page_data['meta_description'] = meta_desc_tag.get('content', '').strip()
 
                 scraped_data.append(page_data)
+                logger.info(f"Scraped content from {current_url}")
 
                 # Find new links to follow
                 if len(visited_urls) < max_pages and depth < max_depth:
@@ -112,3 +120,4 @@ def scrape_company_website(website_url, max_pages=10, max_depth=2):
         raise
     finally:
         driver.quit()
+

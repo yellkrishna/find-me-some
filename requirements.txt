@@ -11,8 +11,10 @@ aiohttp
 openai
 transformers
 streamlit
-langchain_ollama
+faiss-cpu
 selenium
 lxml
 html5lib
-
+streamlit
+openai
+tiktoken
