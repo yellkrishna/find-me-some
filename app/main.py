@@ -8,6 +8,11 @@ import os
 from dotenv import load_dotenv
 import logging
 
+import pickle
+from langchain.chains import RetrievalQA
+from langchain.chat_models import ChatOpenAI
+from langchain.prompts import PromptTemplate
+
 load_dotenv()
 
 # Initialize logging
@@ -22,6 +27,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Ensure OpenAI API key is set
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+logging.info(OPENAI_API_KEY)
+if not OPENAI_API_KEY:
+    logger.error("OPENAI_API_KEY is not set in the environment variables.")
+
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -29,9 +40,14 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI()
 
+vector_stores = {} 
+
 class WebsiteInfo(BaseModel):
     website_url: str        
 
+class UserQuery(BaseModel):
+    website_url: str
+    query: str
 
 @app.post("/collect-data/")
 async def collect_website_data(info: WebsiteInfo):
@@ -39,6 +55,7 @@ async def collect_website_data(info: WebsiteInfo):
         # Step 1: Data Collection
         collected_data = collect_data(info.website_url)
         website_data = collected_data.get("website_data")
+        vector_store = collected_data.get("vector_store")
         logger.info(f"Collected Data: {website_data}")
 
         # Commenting out the rest of the steps for now
@@ -47,6 +64,12 @@ async def collect_website_data(info: WebsiteInfo):
         # Step 4: Data Enrichment
         # Step 5: Indexing
         # Step 6: Summarization
+
+
+        # Store vector store in memory
+        if vector_store:
+            vector_stores[info.website_url] = vector_store
+            logger.info(f"Vector store for {info.website_url} saved.")
 
         # Step 7: Store in Supabase
         data_to_store = {
@@ -71,4 +94,52 @@ async def get_website_data(website_url: str = Query(..., description="URL of the
         return {"data": data}
     except Exception as e:
         logger.error(f"Failed to retrieve data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/query/")
+async def handle_query(user_query: UserQuery):
+    try:
+        # Retrieve the vector store
+        vector_store = vector_stores.get(user_query.website_url)
+        if not vector_store:
+            raise HTTPException(status_code=404, detail="Vector store not found for this website.")
+
+        # Set up LLM
+        llm = ChatOpenAI(
+            model_name='gpt-3.5-turbo',  # Use model_name instead of model
+            temperature=0.0,
+            openai_api_key=OPENAI_API_KEY
+        )
+
+        # Define prompt template
+        template = (
+            "You are tasked with extracting specific information from the following text content.\n\n"
+            "Instructions:\n"
+            "1. Extract only the information that directly matches the user's query: '{question}'.\n"
+            "2. Do not include any additional text, comments, or explanations.\n"
+            "3. If no information matches the query, return an empty string ('').\n"
+            "4. Provide the information exactly as it appears in the text.\n\n"
+            "**Text Content:**\n{context}\n\n"
+            "**Your Response:**"
+        )
+
+        prompt = PromptTemplate(
+            template=template,
+            input_variables=['context', 'question']
+        )
+
+        # Create RetrievalQA chain
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=vector_store.as_retriever(),
+            chain_type_kwargs={"prompt": prompt}
+        )
+
+        # Run the chain
+        response = qa_chain.run(user_query.query)
+
+        return {"response": response}
+    except Exception as e:
+        logger.error(f"An error occurred during query processing: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -127,3 +127,36 @@ if st.session_state.dom_content:
                 st.markdown("---")  # Divider between chunks
 else:
     st.info("No DOM content to display. Please collect data first.")
+
+
+# Section for User Query
+st.sidebar.markdown("---")
+st.sidebar.header("Ask a Question")
+
+# User input for query
+user_question = st.sidebar.text_area("Enter your question related to the website data:", "")
+
+# Button to submit the query
+if st.sidebar.button("Submit Query"):
+    if user_question.strip() == "":
+        st.sidebar.warning("Please enter a question.")
+    else:
+        with st.spinner("Generating response..."):
+            try:
+                # Send POST request to FastAPI /query/ endpoint
+                response = requests.post(
+                    f"{FASTAPI_URL}/query/",
+                    json={
+                        "website_url": website_url,
+                        "query": user_question
+                    }
+                )
+                if response.status_code == 200:
+                    llm_response = response.json().get("response")
+                    st.subheader("LLM Response")
+                    st.write(llm_response)
+                else:
+                    error_detail = response.json().get("detail", "Unknown error occurred.")
+                    st.error(f"Error: {error_detail}")
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
